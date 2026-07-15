@@ -29,6 +29,8 @@ import static java.util.Collections.emptyList;
  */
 public class Scanner implements Closeable {
     private static final ThreadLocal<RawMatchEventHandler> activeCallback = new ThreadLocal<>();
+    private static final ThreadLocal<ByteBuffer> scanBuffer = ThreadLocal.withInitial(() -> ByteBuffer.allocateDirect(0));
+    private static final ThreadLocal<ByteBuffer> hasMatchBuffer = ThreadLocal.withInitial(() -> ByteBuffer.allocateDirect(0));
 
     private static class NativeScratch extends hs_scratch_t {
         void registerDeallocator() {
@@ -144,7 +146,14 @@ public class Scanner implements Closeable {
      * @param eventHandler Handler to receive match events with string indices.
      */
     public void scan(final Database db, final String input, StringMatchEventHandler eventHandler) {
-        ByteBuffer byteBuffer = ByteBuffer.allocateDirect(input.length() * 4);
+        int required = input.length() * 4;
+        ByteBuffer byteBuffer = scanBuffer.get();
+        if (byteBuffer.capacity() < required) {
+            byteBuffer = ByteBuffer.allocateDirect(required);
+            scanBuffer.set(byteBuffer);
+        } else {
+            ((Buffer) byteBuffer).clear();
+        }
         final ByteCharMapping mapping = Utf8Encoder.encodeToBufferAndMap(byteBuffer, input);
 
         scan(db, byteBuffer, (expressionId, fromByteIdx, toByteIdx, flags) -> {
@@ -171,10 +180,35 @@ public class Scanner implements Closeable {
      * @param eventHandler Handler to receive match events with byte indices.
      */
     public void scan(final Database db, final byte[] input, ByteMatchEventHandler eventHandler) {
-        scan(db, ByteBuffer.wrap(input),
-            (expressionId, fromByteIdx, toByteIdx, expressionFlags) ->
-                    eventHandler.onMatch(db.getExpression(expressionId), fromByteIdx, toByteIdx)
-        );
+        RawMatchEventHandler rawHandler = input == null || input.length == 0
+                ? (expressionId, fromByteIdx, toByteIdx, expressionFlags) -> true
+                : (expressionId, fromByteIdx, toByteIdx, expressionFlags) ->
+                    eventHandler.onMatch(db.getExpression(expressionId), fromByteIdx, toByteIdx);
+        scanRaw(db, input, rawHandler);
+    }
+
+    private int scanRaw(final Database db, final byte[] input, RawMatchEventHandler eventHandler) {
+        if (scratch == null) {
+            throw new IllegalStateException("Scratch space has already been deallocated");
+        }
+        if (activeCallback.get() != null) {
+            throw new IllegalStateException("Recursive scanning is not supported.");
+        }
+        activeCallback.set(eventHandler);
+        int hsError = 0;
+        try {
+            hs_database_t database = db.getDatabase();
+            try (final BytePointer bytePointer = new BytePointer(input)) {
+                int length = input == null ? 4 : input.length;
+                hsError = hs_scan(database, bytePointer, length, 0, scratch, matchHandler, null);
+                if (hsError != 0 && hsError != HS_SCAN_TERMINATED) {
+                    throw HyperscanException.hsErrorToException(hsError);
+                }
+            }
+        } finally {
+            activeCallback.remove();
+        }
+        return hsError;
     }
 
     /**
@@ -238,10 +272,16 @@ public class Scanner implements Closeable {
      * @return true if at least one match is found, false otherwise.
      */
     public boolean hasMatch(final Database db, final byte[] input) {
-        // Allocate a direct buffer and copy data
-        ByteBuffer directBuffer = ByteBuffer.allocateDirect(input.length);
+        int required = input.length;
+        ByteBuffer directBuffer = hasMatchBuffer.get();
+        if (directBuffer.capacity() < required) {
+            directBuffer = ByteBuffer.allocateDirect(required);
+            hasMatchBuffer.set(directBuffer);
+        } else {
+            ((Buffer) directBuffer).clear();
+        }
         directBuffer.put(input);
-        ((Buffer)directBuffer).flip();
+        ((Buffer) directBuffer).flip();
         return hasMatch(db, directBuffer);
     }
 
@@ -254,7 +294,14 @@ public class Scanner implements Closeable {
      * @return true if at least one match is found, false otherwise.
      */
     public boolean hasMatch(final Database db, final String input) {
-        ByteBuffer byteBuffer = ByteBuffer.allocateDirect(input.length() * 4);
+        int required = input.length() * 4;
+        ByteBuffer byteBuffer = scanBuffer.get();
+        if (byteBuffer.capacity() < required) {
+            byteBuffer = ByteBuffer.allocateDirect(required);
+            scanBuffer.set(byteBuffer);
+        } else {
+            ((Buffer) byteBuffer).clear();
+        }
         Utf8Encoder.encodeToBufferAndMap(byteBuffer, input);
         return hasMatch(db, byteBuffer);
     }
