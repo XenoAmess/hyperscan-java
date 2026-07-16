@@ -31,6 +31,7 @@ public class Scanner implements Closeable {
     private static final ThreadLocal<RawMatchEventHandler> activeCallback = new ThreadLocal<>();
     private static final ThreadLocal<ByteBuffer> scanBuffer = ThreadLocal.withInitial(() -> ByteBuffer.allocateDirect(0));
     private static final ThreadLocal<ByteBuffer> hasMatchBuffer = ThreadLocal.withInitial(() -> ByteBuffer.allocateDirect(0));
+    private static final ThreadLocal<ByteBuffer> rawScanBuffer = ThreadLocal.withInitial(() -> ByteBuffer.allocateDirect(0));
 
     private static class NativeScratch extends hs_scratch_t {
         void registerDeallocator() {
@@ -188,6 +189,18 @@ public class Scanner implements Closeable {
     }
 
     private int scanRaw(final Database db, final byte[] input, RawMatchEventHandler eventHandler) {
+        if (input != null && input.length > 0) {
+            ByteBuffer directBuffer = rawScanBuffer.get();
+            if (directBuffer.capacity() < input.length) {
+                directBuffer = ByteBuffer.allocateDirect(input.length);
+                rawScanBuffer.set(directBuffer);
+            } else {
+                ((Buffer) directBuffer).clear();
+            }
+            directBuffer.put(input);
+            ((Buffer) directBuffer).flip();
+            return scan(db, directBuffer, eventHandler);
+        }
         if (scratch == null) {
             throw new IllegalStateException("Scratch space has already been deallocated");
         }
