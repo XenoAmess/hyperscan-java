@@ -159,11 +159,11 @@ public class Scanner implements Closeable {
 
         scan(db, byteBuffer, (expressionId, fromByteIdx, toByteIdx, flags) -> {
             Expression expression = db.getExpression(expressionId);
-            long fromStringIndex = mapping.getMappingSize() > 0 ? mapping.getCharIndex((int)fromByteIdx) : 0;
+            long fromStringIndex = mapping.getCharIndex((int)fromByteIdx);
             long toStringIndex = 0;
 
             if(toByteIdx > 0) {
-                toStringIndex = mapping.getMappingSize() > 0 ? mapping.getCharIndex((int)toByteIdx - 1) : 0;
+                toStringIndex = mapping.getCharIndex((int)toByteIdx - 1);
             }
 
             return eventHandler.onMatch(expression, fromStringIndex, toStringIndex);
