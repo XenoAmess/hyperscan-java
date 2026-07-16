@@ -19,6 +19,7 @@ import static java.util.function.Function.identity;
  */
 public class Database implements Closeable {
     private final Map<Integer, Expression> expressions;
+    private final Expression[] expressionsById;
     private final int expressionCount;
 
     private NativeDatabase database;
@@ -49,6 +50,40 @@ public class Database implements Closeable {
                 this.expressions.put(i++, expression);
             }
         }
+
+        this.expressionsById = buildExpressionsById(expressions, hasIds);
+    }
+
+    private static Expression[] buildExpressionsById(List<Expression> expressions, boolean hasIds) {
+        int maxId = -1;
+        if (hasIds) {
+            for (Expression expression : expressions) {
+                Integer id = expression.getId();
+                if (id != null && id > maxId) {
+                    maxId = id;
+                }
+            }
+        } else {
+            maxId = expressions.size() - 1;
+        }
+        if (maxId < 0 || maxId > Math.max(4 * expressions.size(), 1024)) {
+            return null;
+        }
+        Expression[] byId = new Expression[maxId + 1];
+        if (hasIds) {
+            for (Expression expression : expressions) {
+                Integer id = expression.getId();
+                if (id != null) {
+                    byId[id] = expression;
+                }
+            }
+        } else {
+            int i = 0;
+            for (Expression expression : expressions) {
+                byId[i++] = expression;
+            }
+        }
+        return byId;
     }
 
     private static void handleErrors(int hsError, hs_compile_error_t compileError, List<Expression> expressions) throws CompileErrorException {
@@ -139,6 +174,13 @@ public class Database implements Closeable {
     }
 
     Expression getExpression(int id) {
+        Expression[] byId = expressionsById;
+        if (byId != null && id >= 0 && id < byId.length) {
+            Expression expression = byId[id];
+            if (expression != null) {
+                return expression;
+            }
+        }
         return expressions.get(id);
     }
 
