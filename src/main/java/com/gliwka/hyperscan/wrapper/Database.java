@@ -31,6 +31,10 @@ public class Database implements Closeable {
         }
     }
 
+    private static final Map<Integer, ExpressionFlag> BITMASK_TO_FLAG =
+            Collections.unmodifiableMap(Arrays.stream(ExpressionFlag.values())
+                    .collect(Collectors.toMap(ExpressionFlag::getBits, identity())));
+
     private Database(NativeDatabase database, List<Expression> expressions) {
         this.database = database;
         this.expressionCount = expressions.size();
@@ -291,10 +295,6 @@ public class Database implements Closeable {
         int expressionCount = expressionsDataIn.readInt();
         List<Expression> expressions = new ArrayList<>(expressionCount);
 
-        // Setup a lookup map for expression flags
-        Map<Integer, ExpressionFlag> bitmaskToFlag = Arrays.stream(ExpressionFlag.values())
-                .collect(Collectors.toMap(ExpressionFlag::getBits, identity()));
-
         for (int i = 0; i < expressionCount; i++) {
             int id = expressionsDataIn.readInt();
             String pattern = expressionsDataIn.readUTF();
@@ -302,7 +302,7 @@ public class Database implements Closeable {
             EnumSet<ExpressionFlag> flags = EnumSet.noneOf(ExpressionFlag.class);
             for (int j = 0; j < flagCount; j++) {
                 int bitmask = expressionsDataIn.readInt();
-                flags.add(bitmaskToFlag.get(bitmask));
+                flags.add(BITMASK_TO_FLAG.get(bitmask));
 
             }
             expressions.add(new Expression(pattern, flags, id == -1 ? null : id));
