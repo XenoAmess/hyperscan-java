@@ -188,6 +188,39 @@ public class Scanner implements Closeable {
         scanRaw(db, input, rawHandler);
     }
 
+    /**
+     * Scans a {@link ByteBuffer} for matches using a compiled expression database
+     * and reports matches to the provided event handler using byte indices.
+     * Bytes from the buffer's current position to its limit are scanned; the
+     * position and limit are not modified.
+     * Direct buffers are scanned zero-copy. Heap buffers are first copied into
+     * a reused per-thread direct buffer.
+     * Can only be executed one at a time on a per-instance basis.
+     *
+     * @param db           Database containing expressions to use for matching.
+     * @param input        Buffer to match against.
+     * @param eventHandler Handler to receive match events with byte indices.
+     */
+    public void scan(final Database db, final ByteBuffer input, ByteMatchEventHandler eventHandler) {
+        RawMatchEventHandler rawHandler = (expressionId, fromByteIdx, toByteIdx, expressionFlags) ->
+                eventHandler.onMatch(db.getExpression(expressionId), fromByteIdx, toByteIdx);
+        if (input.isDirect()) {
+            scan(db, input, rawHandler);
+            return;
+        }
+        int remaining = input.remaining();
+        ByteBuffer directBuffer = rawScanBuffer.get();
+        if (directBuffer.capacity() < remaining) {
+            directBuffer = ByteBuffer.allocateDirect(remaining);
+            rawScanBuffer.set(directBuffer);
+        } else {
+            ((Buffer) directBuffer).clear();
+        }
+        directBuffer.put(input.duplicate());
+        ((Buffer) directBuffer).flip();
+        scan(db, directBuffer, rawHandler);
+    }
+
     private int scanRaw(final Database db, final byte[] input, RawMatchEventHandler eventHandler) {
         if (input != null && input.length > 0) {
             ByteBuffer directBuffer = rawScanBuffer.get();
